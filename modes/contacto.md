@@ -1,129 +1,251 @@
-# Mode: contacto -- Outreach messages
+# Mode: contacto -- 中国招聘平台沟通话术
 
-> Apply `voice-dna.md` (if present) to every generated message — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_shared.md` → Voice DNA.
+本模式用于为中国软件开发实习求职生成短沟通话术。
 
-This mode has two variants that share the same persona engine (recruiter → hard
-requirements; hiring manager → impact/vision):
+支持平台：
+- BOSS直聘
+- 牛客
+- 拉勾
 
-- **LinkedIn power move** (default) — find contacts and draft a ≤300-char message
-  tied to a specific application/interview. This is the flow below.
-- **Greeting** — a single ultra-short first-touch message for platforms with a hard
-  character budget (BOSS Zhipin 打招呼, job-board chat, a cold-email opener). No
-  contact discovery. See **Greeting variant** at the end of this file.
+目标候选人：
+- 软件工程本科生
+- Java后端开发实习
+- AI应用开发实习
+- 全栈开发实习
 
-**Pick the variant:** use **Greeting** when the user says "greeting" / "打招呼" /
-"cold opener", names a chat-style platform (e.g. BOSS Zhipin), or asks for a very
-short message; otherwise run the LinkedIn power move below.
-
-## LinkedIn power move (default)
-
-1. **Identify targets** via WebSearch:
-   - Hiring manager of the team
-   - Assigned recruiter
-   - 2-3 team peers (people with similar roles)
-   - Interviewer (if the candidate already has a scheduled interview)
-
-2. **Classify contact type** -- ask the candidate or infer from context:
-   - **Recruiter** -- person whose role is talent acquisition, sourcing, or recruiting
-   - **Hiring Manager** -- the person who leads the hiring team
-   - **Peer** -- someone with a similar role in the team (indirect referral)
-   - **Interviewer** -- someone who will interview the candidate (known date)
-
-3. **Select primary target**: the person who would benefit most from the candidate being there
-
-4. **Generate message** with a 3-sentence framework adapted to the contact type:
-
-   ### Recruiter
-   - **Sentence 1 (Fit)**: Direct match criteria -- role, relevant experience, availability, or location
-   - **Sentence 2 (Proof)**: Data that answers their screening questions before they ask them (e.g., "5 years building ML pipelines, currently in Berlin, available immediately")
-   - **Sentence 3 (CTA)**: "Happy to share my CV if this aligns with what you're looking for"
-
-   ### Hiring Manager
-   - **Sentence 1 (Hook)**: Specific challenge their team is facing (extracted from the JD, company blog, or news)
-   - **Sentence 2 (Proof)**: Candidate's greatest quantifiable achievement showing they have solved similar problems
-   - **Sentence 3 (CTA)**: "Would love to hear how your team is approaching [specific challenge]"
-
-   ### Peer (referral)
-   - **Sentence 1 (Interest)**: Genuine reference to their work -- blog post, talk, open-source project, or publication
-   - **Sentence 2 (Connection)**: Something the candidate is doing in the same space (NOT a job pitch)
-   - **Sentence 3 (CTA)**: "I've been working on similar problems at [company], would love to hear your take on [topic]"
-   - **Note**: DO NOT ask for a job. The referral happens naturally if the conversation flows.
-
-   ### Interviewer (pre-interview)
-   - **Sentence 1 (Research)**: Reference to something specific from their work or trajectory
-   - **Sentence 2 (Context)**: Light connection to the candidate's experience in that area
-   - **Sentence 3 (CTA)**: "Looking forward to our conversation on [date]"
-   - **Note**: Light tone, not desperate. The goal is to show that you prepared.
-
-5. **Versions**:
-   - EN (default)
-   - ES (if Spanish company)
-
-6. **Alternative targets** with justification for why they are good second choices
-
-**Contact channel preference:** Read `contact_preferences.preferred_channel` from
-`config/profile.yml`. If it is absent or set to `"either"`, write the CTA
-sentence exactly as specified above — no change. If it is set to `"email"` or
-`"phone"`, steer the CTA toward that channel instead of the generic default
-(e.g. Recruiter's CTA becomes "Happy to share my CV over email if this aligns
-with what you're looking for" rather than defaulting to a call; Hiring
-Manager's CTA leans on "happy to continue this over email" instead of
-proposing a call). Keep the same
-3-sentence structure and per-persona emphasis -- only the channel named in the
-CTA changes. If `contact_preferences.note` is set, you may fold its intent into
-the CTA phrasing (e.g. "screens unknown numbers" → prefer email wording) but do
-not quote the note verbatim in a public-facing message.
-
-**Message rules:**
-- Maximum 300 characters (LinkedIn connection request limit)
-- NO corporate-speak
-- NO "I'm passionate about..."
-- Something that makes them want to respond
-- NEVER share phone number
-- The contact type changes the EMPHASIS, not the structure
+必须读取：
+- `cv.md`
+- `config/profile.yml`
+- `modes/_profile.md`
+- 当前 JD 或岗位分析报告
 
 ---
 
-## Greeting variant
+## 核心原则
 
-A single, punchy first-touch message for platforms where the opener has a hard
-character budget — BOSS Zhipin's 打招呼, job-board chat boxes, or the first line
-of a cold email. Reuses the persona engine above; the difference is brevity, and
-that there is **no contact discovery**.
+1. 所有内容必须来自 `cv.md`、`config/profile.yml`、`modes/_profile.md` 或当前 JD。
+2. 不编造实习、公司经历、开源项目、奖项、竞赛或量化指标。
+3. 不使用高级岗位表达：
+   - 不写“架构师”
+   - 不写“专家”
+   - 不写“主导企业级架构”
+   - 不写“多年经验”
+4. 风格要像学生本人发给招聘者：
+   - 简洁
+   - 真实
+   - 有技术点
+   - 有求职意图
+5. 不包含手机号、邮箱、身份证、家庭住址等隐私信息。
 
-1. **Skip target identification.** There is no WebSearch/contact-finding step —
-   the message goes to whoever the platform connects you with (usually the poster
-   or the recruiter). Do not fabricate a named recipient.
+---
 
-2. **Classify the recipient's persona** from context (default to **Recruiter** if
-   unknown) and set the emphasis exactly as above:
-   - **Recruiter** → hard requirements met (role, years, stack, location, availability)
-   - **Hiring Manager / Founder** → impact and vision (a result that maps to their goal)
+## 根据投递建议选择话术类型
 
-3. **Synthesize the top 3 match points** between the JD and `cv.md` (same JD↔profile
-   fit logic the LinkedIn flow uses). These are the raw material — you will surface
-   only the strongest one or two that fit the budget.
+必须先读取岗位分析报告或用户给出的投递建议。
 
-4. **Compose ONE message within the character budget.**
-   - **Budget:** read `outreach.greeting_max_chars` from `config/profile.yml`.
-     **Default 150** when the key is absent. The message MUST fit — count and trim.
-   - **Lead with a specific value proposition** (the single strongest match point),
-     not an introduction. Punchy sentences, not paragraphs.
-   - **Language:** match the JD / platform language (e.g. Simplified Chinese for
-     BOSS Zhipin). Character count applies to the output language.
+### 推荐投递
 
-5. **No-fluff policy (hard):** remove filler and replace it with a concrete value
-   prop. Ban phrases like "I'm looking for a job", "I'm passionate about",
-   "I hope to have the opportunity", generic self-description. Every clause must
-   earn its characters.
+生成正常 BOSS/牛客/拉勾开场白。
 
-6. **Output:** the greeting, its character count vs the budget, and a one-line note
-   of which match point(s) it used. Offer a shorter fallback if it's near the limit.
+重点：
+- 学生身份
+- 真实项目经验
+- 与 JD 技术栈匹配
+- 希望参与实际开发
 
-**Greeting rules:**
-- Platform-agnostic — never assume LinkedIn; works for any chat/opener surface.
-- Within `outreach.greeting_max_chars` (default 150). Never exceed it.
-- Same non-fabrication rule as the rest of career-ops: reformulate real experience
-  from `cv.md`, never invent a skill, metric, or claim.
-- NO corporate-speak, NO "I'm passionate about...", NEVER share a phone number.
-- Persona changes the EMPHASIS, not the structure.
+### 谨慎投递
+
+生成询问岗位详情的话术，而不是强推自己。
+
+重点确认：
+- 实习生是否参与真实开发
+- 技术栈是否与 JD 一致
+- 是否有导师或团队指导
+- 城市、到岗时间、每周到岗天数、实习周期
+- 岗位是否外包/驻场/培训性质
+
+### 不推荐
+
+不要生成正常求职话术。
+
+改为生成 **岗位真实性确认问题**。推荐简历版本应视为“无推荐简历版本”，不建议为该岗位定制简历。
+
+必须确认：
+- 是否是真实研发岗位
+- 是否涉及实际代码开发
+- 是否有导师指导
+- 是否收费、培训、贷款或招生转化
+- AI 岗是否真的涉及 LLM/RAG/Agent/FastAPI 等开发，而不是运营、标注、销售或客服
+
+---
+
+## 输出长度
+
+每条消息控制在 **100-150 字**。
+
+如果平台或用户给出更短限制，优先服从用户限制。
+
+---
+
+## 平台风格
+
+### BOSS直聘
+
+特点：
+- 开场要直接。
+- 适合“学生身份 + 技术匹配 + 想了解实习机会”。
+- 不要太正式，也不要像群发广告。
+
+输出：
+- 1 条主版本
+- 1 条更短版本
+
+### 牛客
+
+特点：
+- 可以稍微技术化。
+- 适合突出项目和学习方向。
+- 可用于私信 HR、内推同学或招聘帖回复。
+
+输出：
+- 1 条主版本
+- 1 条偏技术版本
+
+### 拉勾
+
+特点：
+- 偏正式。
+- 适合投递附言。
+- 简洁说明匹配点和求职方向。
+
+输出：
+- 1 条投递附言版本
+
+---
+
+## 生成流程
+
+1. 读取 JD 或报告，识别岗位方向：
+   - Java后端开发实习
+   - AI应用开发实习
+   - 全栈开发实习
+
+2. 读取投递建议：
+   - 推荐投递
+   - 谨慎投递
+   - 不推荐
+
+3. 从 `cv.md` 选择 2-3 个最匹配的真实点：
+   - Java / Spring Boot / RESTful API
+   - MySQL / PostgreSQL / 事务 / 行级锁
+   - Redis 验证码 / 限流 / 防刷
+   - FastAPI / PostgreSQL / Redis
+   - LLM API / RAG / Agent / Prompt Engineering / AI安全
+   - Vue3 / React Native / TypeScript / 前后端联调
+
+4. 根据投递建议选择输出：
+   - 推荐投递：正常开场白。
+   - 谨慎投递：询问岗位详情。
+   - 不推荐：岗位真实性确认问题，不写求职开场白。
+
+5. 输出字符数。
+
+---
+
+## 推荐表达
+
+可以使用：
+- “您好，我是软件工程本科在读”
+- “目标方向是 Java 后端/AI 应用开发实习”
+- “做过 Spring Boot + Vue3 的图书管理系统”
+- “做过 FastAPI + PostgreSQL + Redis 的 AI 应用项目”
+- “实现过事务控制、行级锁、Redis 验证码/限流”
+- “了解 LLM API、RAG、Agent、Prompt Injection 风险识别”
+- “希望参与实际开发，也想了解团队实习安排”
+
+避免使用：
+- “精通”
+- “资深”
+- “架构”
+- “全链路负责人”
+- “多年经验”
+- “行业领先”
+- “赋能”
+- “闭环”
+
+---
+
+## 输出格式
+
+```markdown
+投递建议：{推荐投递 | 谨慎投递 | 不推荐}
+话术类型：{正常开场白 | 岗位详情询问 | 岗位真实性确认问题}
+
+## BOSS直聘
+
+主版本（{字数}字）：
+...
+
+短版本（{字数}字）：
+...
+
+## 牛客
+
+主版本（{字数}字）：
+...
+
+偏技术版本（{字数}字）：
+...
+
+## 拉勾
+
+投递附言（{字数}字）：
+...
+```
+
+如果投递建议为“不推荐”，改用：
+
+```markdown
+投递建议：不推荐
+话术类型：岗位真实性确认问题
+推荐简历版本：无推荐简历版本
+
+需要确认的问题：
+1. ...
+2. ...
+3. ...
+```
+
+---
+
+## 常用模板
+
+### Java后端开发实习
+
+```text
+您好，我是软件工程本科在读，想了解这个 Java 后端实习机会。我做过 Spring Boot + Vue3 的图书管理系统，涉及 RESTful API、事务控制、数据库行级锁和前后端联调；也用过 Redis 做验证码和限流。希望有机会参与实际后端开发。
+```
+
+### AI应用开发实习
+
+```text
+您好，我是软件工程本科在读，目标方向是 AI 应用开发实习。我做过 FastAPI + PostgreSQL + Redis 的智能饮食项目，涉及 LLM API、AI 安全分析和 Prompt Injection 风险识别。想进一步了解这个岗位的 AI 应用开发内容。
+```
+
+### 全栈开发实习
+
+```text
+您好，我是软件工程本科在读，想了解这个全栈实习机会。我做过 Spring Boot + Vue3 的管理系统，也做过 Expo/React Native/TypeScript 项目前后端联调，熟悉接口对接和项目文档整理，希望能参与实际开发。
+```
+
+### 谨慎投递：询问岗位详情
+
+```text
+您好，我是软件工程本科在读，关注到这个实习岗位。想先了解下实习生是否会参与实际代码开发，主要技术栈是否与 JD 一致，以及是否有导师或团队同学指导。如果匹配，我可以进一步发项目经历和简历。
+```
+
+### 不推荐：岗位真实性确认问题
+
+```text
+想先确认几个信息：这个岗位是否是真实研发实习，日常是否参与代码开发？是否有导师指导？是否涉及培训、收费、贷款或招生转化？如果是 AI 岗，是否实际涉及 LLM/RAG/Agent/FastAPI 开发？
+```

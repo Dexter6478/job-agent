@@ -1,62 +1,86 @@
-# Career-Ops — Canonical States
+# Career-Ops — Canonical States for China Internship Search
 # Source of truth for career-ops (writer) and dashboard (reader).
 # Both systems MUST use these exact states.
 #
 # Rule: The status field in applications.md must contain EXACTLY
-# one of these values (case-insensitive). No markdown bold (**),
-# no dates, no extra text. Dates go in the date column.
+# one of these labels (case-insensitive). No markdown bold (**),
+# no dates, no extra text. Dates go in the date column or notes.
 
 states:
-  - id: evaluated
-    label: Evaluated
-    aliases: [evaluada]
-    description: Offer evaluated with report, pending decision
-    dashboard_group: evaluated
+  - id: discovered
+    label: discovered
+    aliases: [发现岗位, discovered, found]
+    description: 发现岗位
+    dashboard_group: discovered
+
+  - id: evaluating
+    label: evaluating
+    aliases: [岗位分析中, evaluating, analyzing]
+    description: 岗位分析中
+    dashboard_group: evaluating
+
+  - id: recommended
+    label: recommended
+    aliases: [推荐投递, recommended]
+    description: 推荐投递
+    dashboard_group: recommended
+
+  - id: contacted
+    label: contacted
+    aliases: [已打招呼, contacted, greeted]
+    description: 已打招呼
+    dashboard_group: contacted
+
+  - id: hr_viewed
+    label: hr_viewed
+    aliases: [HR已读, hr viewed, viewed]
+    description: HR已读
+    dashboard_group: hr_viewed
 
   - id: applied
-    label: Applied
-    aliases: [aplicado, enviada, aplicada, sent]
-    description: Application submitted
+    label: applied
+    aliases: [已投递, applied, submitted]
+    description: 已投递
     dashboard_group: applied
 
-  - id: responded
-    label: Responded
-    aliases: [respondido]
-    description: Company has responded (not yet interview)
-    dashboard_group: responded
+  - id: screening
+    label: screening
+    aliases: [简历筛选, screening, resume screening]
+    description: 简历筛选
+    dashboard_group: screening
 
-  - id: interview
-    label: Interview
-    aliases: [entrevista]
-    description: Active interview process
+  - id: test
+    label: test
+    aliases: [笔试, test, written test, coding test]
+    description: 笔试
+    dashboard_group: test
+
+  - id: interview1
+    label: interview1
+    aliases: [一面, interview1, first interview]
+    description: 一面
+    dashboard_group: interview
+
+  - id: interview2
+    label: interview2
+    aliases: [二面, interview2, second interview]
+    description: 二面
     dashboard_group: interview
 
   - id: offer
-    label: Offer
-    aliases: [oferta]
-    description: Offer received
+    label: offer
+    aliases: [Offer, offer, oc]
+    description: Offer
     dashboard_group: offer
 
   - id: rejected
-    label: Rejected
-    aliases: [rechazado, rechazada]
-    description: Rejected by company
+    label: rejected
+    aliases: [已拒绝, rejected, reject]
+    description: 已拒绝
     dashboard_group: rejected
 
-  - id: discarded
-    label: Discarded
-    aliases: [descartado, descartada, cerrada, cancelada]
-    description: Discarded by candidate or offer closed
-    dashboard_group: discarded
-
-  - id: skip
-    label: SKIP
-    aliases: [no_aplicar, no aplicar, skip, monitor]
-    description: Doesn't fit, don't apply
-    dashboard_group: skip
-
-  - id: hired
-    label: Hired
-    aliases: [contratado, contratada, hired, accepted, accept]
-    description: Offer accepted, job landed!
-    dashboard_group: hired
+  - id: withdrawn
+    label: withdrawn
+    aliases: [主动放弃, withdrawn, discarded, skip]
+    description: 主动放弃
+    dashboard_group: withdrawn

@@ -31,7 +31,7 @@
  * 2 row not found or unreadable tracker · 3 ambiguous company match ·
  * 4 tracker lock timeout (busy — retry later).
  *
- * When the new status is Applied, the JSON output carries
+ * When the new status is the canonical applied state, the JSON output carries
  * `"followupSeedCandidate": true` — the hook point for seeding
  * data/follow-ups.md with the default cadence (#1430, not implemented here).
  */
@@ -150,6 +150,7 @@ if (!newStatus) {
   const valid = states.map(s => s.label).join(' · ');
   failWith(EXIT_USAGE, 'invalid-state', `"${stateInput}" is not a canonical state. Valid states: ${valid}`);
 }
+const appliedStatus = resolveCanonicalState('applied', states);
 
 // ── tracker access ───────────────────────────────────────────────
 
@@ -303,10 +304,10 @@ const result = {
   newStatus,
   ...(note != null ? { note } : {}),
   ...(flags.dryRun ? { dryRun: true } : {}),
-  // Fire the #1430 hook only on an actual transition INTO Applied — an
-  // idempotent re-run of an already-Applied row must not invite a consumer
+  // Fire the #1430 hook only on an actual transition into the canonical applied state
+  // before inviting a follow-up seed consumer
   // to seed a duplicate follow-up.
-  ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
+  ...(statusChanged && appliedStatus && newStatus === appliedStatus ? { followupSeedCandidate: true } : {}),
   tracker: APPS_FILE,
 };
 
@@ -315,8 +316,8 @@ if (flags.json) {
 } else {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
-  if (statusChanged && !flags.dryRun && newStatus === 'Applied') {
-    console.error('ℹ️  Status is Applied — consider seeding follow-ups in data/follow-ups.md (#1430: node followup-cadence.mjs)');
+  if (statusChanged && !flags.dryRun && appliedStatus && newStatus === appliedStatus) {
+    console.error('ℹ️  Status is applied — consider seeding follow-ups in data/follow-ups.md (#1430: node followup-cadence.mjs)');
   }
 }
 process.exit(EXIT_OK);

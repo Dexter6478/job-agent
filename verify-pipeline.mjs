@@ -20,6 +20,8 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import yaml from 'js-yaml';
+import { HEADER_ALIASES } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
@@ -40,22 +42,28 @@ const STATES_FILE = existsSync(join(CAREER_OPS, 'templates/states.yml'))
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 mkdirSync(REPORTS_DIR, { recursive: true });
 
-const CANONICAL_STATUSES = [
-  'evaluated', 'applied', 'responded', 'interview',
-  'offer', 'rejected', 'discarded', 'skip', 'hired',
-];
+function loadCanonicalStatuses() {
+  const doc = yaml.load(readFileSync(STATES_FILE, 'utf-8'));
+  const states = Array.isArray(doc?.states) ? doc.states : [];
+  const labels = new Set();
+  const aliases = new Map();
+  for (const state of states) {
+    const id = String(state.id || '').trim();
+    const label = String(state.label || id).trim();
+    if (!id && !label) continue;
+    for (const value of [id, label, ...(state.aliases || [])]) {
+      const key = String(value || '').trim().toLowerCase();
+      if (key) aliases.set(key, label || id);
+    }
+    if (label) labels.add(label);
+  }
+  return { labels, aliases };
+}
 
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated', 'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied', 'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded', 'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-  'contratado': 'hired', 'contratada': 'hired', 'hired': 'hired', 'accepted': 'hired', 'accept': 'hired',
-};
+const CANONICAL = loadCanonicalStatuses();
+const RESUME_VERSIONS = new Set(['Java后端版', 'AI应用版', '全栈版', '无推荐简历版本']);
+const RESUME_VERSION_ENUMS = new Set(['JavaBackend', 'AIApplication', 'FullStack', 'None', 'java-backend', 'ai-application', 'fullstack', 'none']);
+const RECOMMENDATIONS = new Set(['推荐投递', '谨慎投递', '不推荐']);
 
 let errors = 0;
 let warnings = 0;
@@ -63,6 +71,25 @@ let warnings = 0;
 function error(msg) { console.log(`❌ ${msg}`); errors++; }
 function warn(msg) { console.log(`⚠️  ${msg}`); warnings++; }
 function ok(msg) { console.log(`✅ ${msg}`); }
+
+export function normalizeCompanyName(name) {
+  return String(name ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/有限责任公司/g, '')
+    .replace(/股份有限公司/g, '')
+    .replace(/有限公司/g, '')
+    .replace(/集团/g, '')
+    .replace(/控股/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function normalizeTextKey(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
 
 // --- Read applications.md ---
 if (!existsSync(APPS_FILE)) {
@@ -79,11 +106,8 @@ const lines = content.split('\n');
 // Location where Score is expected and flag false errors. Falls back to the
 // legacy fixed layout when no recognizable header row is found.
 const LEGACY_COLMAP = { num: 1, date: 2, company: 3, role: 4, score: 5, status: 6, pdf: 7, report: 8, notes: 9 };
-const HEADER_ALIASES = {
-  '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
-  'via': 'via', 'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
-  'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
-};
+const V2_FIELDS = ['num', 'date', 'company', 'role', 'city', 'platform', 'url', 'score', 'score100', 'resumeversion', 'recommendation', 'status', 'contact', 'nextaction', 'report'];
+const LEGACY_FIELDS = ['num', 'date', 'company', 'role', 'score', 'status', 'pdf', 'report', 'notes'];
 function detectColumns(allLines) {
   for (const line of allLines) {
     if (!line.startsWith('|')) continue;
@@ -98,6 +122,15 @@ function detectColumns(allLines) {
 const COLMAP = detectColumns(lines) || LEGACY_COLMAP;
 const MAX_IDX = Math.max(...Object.values(COLMAP));
 
+function detectTrackerSchema(colmap) {
+  const has = fields => fields.every(field => colmap[field] != null);
+  if (has(V2_FIELDS)) return 'v2';
+  if (has(LEGACY_FIELDS)) return 'legacy';
+  return 'unknown';
+}
+
+const TRACKER_SCHEMA = detectTrackerSchema(COLMAP);
+
 const entries = [];
 for (const line of lines) {
   if (!line.startsWith('|')) continue;
@@ -111,9 +144,17 @@ for (const line of lines) {
     company: parts[COLMAP.company],
     via: COLMAP.via != null ? parts[COLMAP.via] : '',
     role: parts[COLMAP.role],
+    city: COLMAP.city != null ? parts[COLMAP.city] : '',
     location: COLMAP.location != null ? parts[COLMAP.location] : '',
+    platform: COLMAP.platform != null ? parts[COLMAP.platform] : '',
+    url: COLMAP.url != null ? parts[COLMAP.url] : '',
     score: parts[COLMAP.score],
+    score100: COLMAP.score100 != null ? parts[COLMAP.score100] : '',
+    resumeversion: COLMAP.resumeversion != null ? parts[COLMAP.resumeversion] : '',
+    recommendation: COLMAP.recommendation != null ? parts[COLMAP.recommendation] : '',
     status: parts[COLMAP.status],
+    contact: COLMAP.contact != null ? parts[COLMAP.contact] : '',
+    nextaction: COLMAP.nextaction != null ? parts[COLMAP.nextaction] : '',
     pdf: parts[COLMAP.pdf],
     report: parts[COLMAP.report],
     notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
@@ -122,6 +163,10 @@ for (const line of lines) {
 
 console.log(`\n📊 Checking ${entries.length} entries in applications.md\n`);
 
+if (TRACKER_SCHEMA === 'v2') ok('schema: V2 China tracker detected');
+else if (TRACKER_SCHEMA === 'legacy') ok('schema: Legacy tracker detected');
+else error('schema: Unknown applications.md header; expected V2 or Legacy tracker columns');
+
 // --- Check 1: Canonical statuses ---
 let badStatuses = 0;
 for (const e of entries) {
@@ -129,7 +174,7 @@ for (const e of entries) {
   // Strip trailing dates
   const statusOnly = clean.replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
 
-  if (!CANONICAL_STATUSES.includes(statusOnly) && !ALIASES[statusOnly]) {
+  if (!CANONICAL.aliases.has(statusOnly)) {
     error(`#${e.num}: Non-canonical status "${e.status}"`);
     badStatuses++;
   }
@@ -152,8 +197,7 @@ if (badStatuses === 0) ok('All statuses are canonical');
 const companyRoleMap = new Map();
 let dupes = 0;
 for (const e of entries) {
-  const key = e.company.toLowerCase().replace(/[^a-z0-9]/g, '') + '::' +
-    e.role.toLowerCase().replace(/[^a-z0-9 ]/g, '');
+  const key = normalizeCompanyName(e.company) + '::' + normalizeTextKey(e.role);
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
 }
@@ -187,12 +231,42 @@ if (brokenReports === 0) ok('All report links valid');
 let badScores = 0;
 for (const e of entries) {
   const s = e.score.replace(/\*\*/g, '').trim();
-  if (!/^\d+\.?\d*\/5$/.test(s) && s !== 'N/A' && s !== 'DUP') {
+  const validLegacyScore = /^\d+\.?\d*\/5$/.test(s) || s === 'N/A' || s === 'DUP';
+  const validScore100 = /^(?:100|[1-9]?\d)$/.test(s);
+  if (TRACKER_SCHEMA === 'v2' ? (!validLegacyScore && !validScore100) : !validLegacyScore) {
     error(`#${e.num}: Invalid score format: "${e.score}"`);
     badScores++;
   }
 }
 if (badScores === 0) ok('All scores valid');
+
+// --- Check 4b: China V2 structured fields ---
+let v2FieldIssues = 0;
+if (TRACKER_SCHEMA === 'v2') {
+  for (const e of entries) {
+    const score100 = String(e.score100 || '').replace(/\*\*/g, '').trim();
+    if (/^\d+\/100$/.test(score100)) {
+      warn(`#${e.num}: Score100 should be a plain 0-100 number, not "${e.score100}"`);
+      v2FieldIssues++;
+    } else if (!/^(?:100|[1-9]?\d)$/.test(score100)) {
+      error(`#${e.num}: Score100 must be 0-100, got "${e.score100}"`);
+      v2FieldIssues++;
+    }
+
+    const resume = String(e.resumeversion || '').trim();
+    if (resume && !RESUME_VERSIONS.has(resume) && !RESUME_VERSION_ENUMS.has(resume)) {
+      error(`#${e.num}: Invalid ResumeVersion "${e.resumeversion}"`);
+      v2FieldIssues++;
+    }
+
+    const recommendation = String(e.recommendation || '').trim();
+    if (recommendation && !RECOMMENDATIONS.has(recommendation)) {
+      error(`#${e.num}: Invalid Recommendation "${e.recommendation}"`);
+      v2FieldIssues++;
+    }
+  }
+  if (v2FieldIssues === 0) ok('China V2 fields valid');
+}
 
 // --- Check 5: Row format ---
 let badRows = 0;
@@ -260,7 +334,7 @@ if (staleSentinels === 0) ok('No stale reservation sentinels');
 // Warning-level, not error: duplicates can be legitimate (re-evaluation
 // after a JD change).
 const REPORT_FILE_RE = /^(\d+)-(.+)-\d{4}-\d{2}-\d{2}\.md$/;
-const normalizeKey = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const normalizeKey = normalizeTextKey;
 
 // Role comes from the report body: the Machine Summary YAML fence when
 // present (field names are exact by contract), else the title line
@@ -368,7 +442,7 @@ const channelsByRole = new Map();
 for (const e of entries) {
   const company = String(e.company || '').trim();
   if (!company || company === '?') continue;
-  const key = `${company.toLowerCase()}::${String(e.role || '').trim().toLowerCase()}`;
+  const key = `${normalizeCompanyName(company)}::${normalizeTextKey(e.role)}`;
   if (!channelsByRole.has(key)) channelsByRole.set(key, new Map());
   const channels = channelsByRole.get(key);
   const norm = normalizeChannel(e.via);
@@ -385,6 +459,12 @@ if (viaIssues === 0) ok('Via channels consistent');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));
+console.log(`schema: ${TRACKER_SCHEMA}`);
+console.log(`applications: ${entries.length}`);
+console.log(`score: ${badScores === 0 ? 'ok' : `${badScores} issue(s)`}`);
+console.log(`status: ${badStatuses === 0 ? 'ok' : `${badStatuses} issue(s)`}`);
+console.log(`report: ${brokenReports === 0 ? 'ok' : `${brokenReports} missing`}`);
+console.log(`result: ${errors === 0 ? (warnings === 0 ? 'clean' : 'warnings') : 'errors'}`);
 console.log(`📊 Pipeline Health: ${errors} errors, ${warnings} warnings`);
 if (errors === 0 && warnings === 0) {
   console.log('🟢 Pipeline is clean!');

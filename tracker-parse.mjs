@@ -52,11 +52,12 @@ export const HEADER_ALIASES = (() => {
  * the score and status columns regardless of their order (#1427).
  */
 export const SCORE_CELL_RE = /^\d+(?:\.\d+)?\/5$/;
+export const SCORE100_CELL_RE = /^(?:100|[1-9]?\d)$/;
 
 /** @param {string} v @returns {boolean} whether the cell reads as a score. */
 export function looksLikeScoreCell(v) {
   const t = String(v ?? '').replace(/\*\*/g, '').trim();
-  return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP';
+  return SCORE_CELL_RE.test(t) || SCORE100_CELL_RE.test(t) || t === 'N/A' || t === 'DUP';
 }
 
 /**
@@ -140,8 +141,16 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
     date: at('date'),
     company: at('company'),
     role: at('role'),
+    city: at('city'),
+    platform: at('platform'),
+    url: at('url'),
     score: at('score'),
+    score100: at('score100'),
+    resumeversion: at('resumeversion'),
+    recommendation: at('recommendation'),
     status: at('status'),
+    contact: at('contact'),
+    nextaction: at('nextaction'),
     pdf: at('pdf'),
     report: at('report'),
     notes: at('notes'),

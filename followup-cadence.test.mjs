@@ -1,14 +1,13 @@
 /**
- * followup-cadence.test.mjs — tests for computeNextFollowupDate cadence selection.
- *
- * Focuses on the `responded` branch, where the first follow-up after a recruiter
- * reply must be scheduled with `responded_initial`, not `responded_subsequent`.
+ * followup-cadence.test.mjs - tests for China canonical follow-up cadence.
  *
  * Run: node followup-cadence.test.mjs
  */
 
 import {
   computeNextFollowupDate,
+  computeUrgency,
+  normalizeStatus,
   addDays,
   parseDate,
   DEFAULT_CADENCE,
@@ -34,37 +33,64 @@ function eq(label, actual, expected) {
 
 const APP = '2026-06-30';
 
-// The first follow-up after a recruiter response is due at appDate + responded_initial.
-// responded_initial (and its profile override responded_initial_days) is otherwise only
-// read by computeUrgency, so before the fix it had no effect on the scheduled date.
 eq(
-  'responded, no prior follow-up uses responded_initial',
-  computeNextFollowupDate('responded', APP, null, 0),
-  addDays(parseDate(APP), DEFAULT_CADENCE.responded_initial),
+  'contacted, no prior follow-up uses contacted_first',
+  computeNextFollowupDate('contacted', APP, null, 0),
+  addDays(parseDate(APP), DEFAULT_CADENCE.contacted_first),
 );
 
-// Subsequent follow-ups still use responded_subsequent, counted from the last follow-up.
 eq(
-  'responded, with prior follow-up uses responded_subsequent',
-  computeNextFollowupDate('responded', APP, '2026-07-02', 1),
-  addDays(parseDate('2026-07-02'), DEFAULT_CADENCE.responded_subsequent),
+  'contacted, with prior follow-up uses contacted_subsequent',
+  computeNextFollowupDate('contacted', APP, '2026-07-02', 1),
+  addDays(parseDate('2026-07-02'), DEFAULT_CADENCE.contacted_subsequent),
 );
 
-// The initial next-date must not land after the overdue threshold, otherwise a row can be
-// flagged "overdue" (daysSinceApp >= responded_subsequent) while its own next-follow-up
-// date is still in the future, which is impossible for a date meant to trigger "overdue".
 eq(
-  'initial next follow-up is not later than the overdue threshold',
-  computeNextFollowupDate('responded', APP, null, 0) <=
-    addDays(parseDate(APP), DEFAULT_CADENCE.responded_subsequent),
-  true,
+  'contacted becomes overdue after contacted_first days',
+  computeUrgency('contacted', DEFAULT_CADENCE.contacted_first, null, 0),
+  'overdue',
 );
 
-// Regression: the applied branch is unchanged.
 eq(
   'applied, no follow-ups uses applied_first',
   computeNextFollowupDate('applied', APP, null, 0),
   addDays(parseDate(APP), DEFAULT_CADENCE.applied_first),
+);
+
+eq(
+  'applied becomes overdue after applied_first days',
+  computeUrgency('applied', DEFAULT_CADENCE.applied_first, null, 0),
+  'overdue',
+);
+
+eq(
+  'interview1 prompts immediate interview preparation',
+  computeUrgency('interview1', 0, null, 0),
+  'urgent',
+);
+
+eq(
+  'interview1 next action date is immediate',
+  computeNextFollowupDate('interview1', APP, null, 0),
+  APP,
+);
+
+eq(
+  'legacy Responded normalizes to contacted',
+  normalizeStatus('Responded'),
+  'contacted',
+);
+
+eq(
+  'legacy Interview normalizes to interview1',
+  normalizeStatus('Interview'),
+  'interview1',
+);
+
+eq(
+  'legacy Applied still normalizes to applied',
+  normalizeStatus('Applied'),
+  'applied',
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -1,54 +1,163 @@
-# Mode: tracker — Applications Tracker
+# Mode: tracker -- 中国实习投递管理
 
-Read and display `data/applications.md`.
+读取并展示 `data/applications.md`，用于管理中国互联网实习投递流程。
 
-**Tracker Format:**
+本模式只做追踪、总结和建议。不要代表候选人点击投递、发送消息或提交表单。
+
+---
+
+## 推荐追踪字段
+
+优先按以下字段理解和展示每条记录：
+
+| 字段 | 含义 |
+|---|---|
+| 公司 | 招聘公司或实际用人单位 |
+| 岗位 | 岗位名称 |
+| 城市 | 工作/实习城市 |
+| 招聘平台 | BOSS直聘 / 牛客 / 拉勾 / 公司官网 / 内推 / 其他 |
+| JD链接 | 岗位链接或本地 JD 文件 |
+| 匹配评分 | 0-100 分，来自中文 JD 分析 |
+| 推荐简历版本 | Java后端版 / AI应用版 / 全栈版 |
+| 投递状态 | 使用 `templates/states.yml` 中的状态 |
+| 联系人 | HR、招聘者、内推人、面试官；未知则写“未记录” |
+| 最近沟通时间 | YYYY-MM-DD 或“未记录” |
+| 下一步动作 | 例如打招呼、跟进、准备笔试、一面复盘 |
+
+如果现有 `data/applications.md` 仍是默认表格：
 
 ```markdown
 | # | Date | Company | Role | Score | Status | PDF | Report | Notes |
 ```
 
-With the optional Via column (intermediary channel, #1596) after Company:
+则在展示时做语义映射：
+- Company -> 公司
+- Role -> 岗位
+- Score -> 匹配评分
+- Status -> 投递状态
+- Report -> JD分析报告
+- Notes -> 城市、平台、联系人、最近沟通时间、下一步动作等补充信息
 
-```markdown
-| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
+不要为了展示方便随意改表结构；如果需要新增字段，先向用户说明再处理。
+
+---
+
+## 中国实习投递状态
+
+合法状态以 `templates/states.yml` 为准：
+
+```text
+discovered   发现岗位
+evaluating   岗位分析中
+recommended  推荐投递
+contacted    已打招呼
+hr_viewed    HR已读
+applied      已投递
+screening    简历筛选
+test         笔试
+interview1   一面
+interview2   二面
+offer        Offer
+rejected     已拒绝
+withdrawn    主动放弃
 ```
 
-- `Via` = the agency/recruiter firm the application goes through; `—` for direct applications. Add the column to an existing tracker with `node merge-tracker.mjs --migrate-via` (all scripts auto-detect both layouts).
-- **Unknown end employer** (recruiter hasn't named the client yet): Company = `?` (the structural marker — never the word "Confidential", which is locale-dependent and collides with real firm names), Via = the agency, and a distinguishing descriptor in Notes (e.g. `fintech, Leeds`). Display it to the user as "Confidential (via {Via})".
-- The row's identity is its `#` (report number) — Company is display data and changes at most once, at reveal.
+建议流程：
 
-Possible states: `Evaluated` → `Applied` → `Responded` → `Interview` → `Offer` / `Rejected` / `Discarded` / `SKIP`
+```text
+发现岗位 -> 岗位分析中 -> 推荐投递 -> 已打招呼 -> HR已读 -> 已投递 -> 简历筛选 -> 笔试 -> 一面 -> 二面 -> Offer
+```
 
-- `Evaluated` = offer evaluated with report, pending decision
-- `Applied` = the candidate submitted their application
-- `Responded` = Company has responded (not yet interview)
-- `Interview` = active interview process
-- `Offer` = job offer received
-- `Rejected` = rejected by company
-- `Discarded` = discarded by candidate or offer closed
-- `SKIP` = doesn't fit, don't apply
+分支：
+- 任意阶段可进入 `rejected`
+- 候选人主动不继续时进入 `withdrawn`
 
-If the user asks to update a state, edit the corresponding row.
+---
 
-**Salary observations:** when the user reports a confirmed compensation figure for a row ("recruiter said 84k", "offer letter says 92k", "signed at 90k"), append one `actual` observation line to `data/salary-observations.tsv` (create the file if missing; format per `docs/SCRIPTS.md` → salary-gap) with the source tier matching how the figure arrived: `recruiter-verbal` for a spoken figure, `offer-letter` for a written offer, `contract` for a signed contract. The log is append-only — a new figure is a new line, never an edit of a prior one. Then echo that application's gap in one line (advertised vs actual vs desired); `node salary-gap.mjs --summary` shows the full picture.
+## 展示视图
 
-**Reveal workflow (#1596):** when the user learns the end employer of a `?` row ("the Hays role is Barclays"):
+当用户要求查看 tracker 时，输出：
 
-1. Edit the row's Company cell in place (`?` → real name). Never renumber.
-2. Update the report: append the company to the H1 title, fill the header fields, and set `company_confidential: false` (+ real `company:`) in the Machine Summary YAML. **Never rename the report file** — the number is the identity, links stay stable.
-3. Run the cross-channel check: `node verify-pipeline.mjs`. If the same company+role now exists under a different Via (agency + direct, or two agencies), warn the user loudly — **never auto-merge**; both submissions really happened and the user decides which channel owns the candidacy.
+1. 总览统计
+   - 总岗位数
+   - 推荐投递数
+   - 已打招呼数
+   - 已投递数
+   - 面试中数量
+   - Offer 数
+   - 已拒绝数量
 
-Be honest about timing: this check catches damage after the fact. The preventive check happens in `apply` mode, before authorizing an agency submission.
+2. 当前需要动作的岗位
+   - recommended 但未 contacted
+   - contacted 后 2 天无回复
+   - hr_viewed 后 3 天无回复
+   - applied 后 5 天无反馈
+   - test / interview1 / interview2 需要准备
 
-Also show statistics:
-- Total applications
-- Breakdown by state
-- Average score
-- % with PDF generated
-- % with report generated
-- If `data/salary-observations.tsv` has confirmed `actual` observations, include the output of `node salary-gap.mjs --summary` (advertised→actual gaps, desired attainment)
+3. 按状态分组的岗位表
 
-For the full lifetime stats view (cumulative funnel, scanner totals, portal
-coverage, follow-up compliance), run `node stats.mjs --summary` and present its
-output. Zero tokens — never recompute these numbers manually.
+---
+
+## HR 跟进建议
+
+根据状态和最近沟通时间给出建议。
+
+### 已打招呼 2 天无回复
+
+建议：
+- 不要连续催。
+- 可以换一个更短的技术匹配开场，或确认 JD 是否仍在招聘。
+
+示例：
+
+```text
+您好，想再确认下这个实习岗位是否还在招聘。我是软件工程本科在读，做过 Spring Boot 后端和 Redis 验证码/限流相关项目，和岗位技术栈比较匹配。如方便的话，想了解下后续流程。
+```
+
+### HR已读 3 天无回复
+
+建议生成跟进消息：
+
+```text
+您好，看到消息已读，想跟进确认一下这个岗位是否还在推进。我这边主要方向是 Java 后端/AI 应用开发，做过 Spring Boot、Redis、PostgreSQL/FastAPI 相关项目。如果岗位还开放，希望有机会进一步沟通。
+```
+
+### 已投递 5 天无反馈
+
+建议：
+- 如果平台允许，发一次简短跟进。
+- 同时继续投递其他岗位，不等待单一机会。
+
+示例：
+
+```text
+您好，我前几天投递了这个实习岗位，想确认简历是否已进入筛选流程。我目前是软件工程本科在读，有 Java 后端和 AI 应用项目经验，如需要补充项目说明我可以提供。
+```
+
+### 笔试 / 面试阶段
+
+建议：
+- 进入 `test`：运行面试/笔试准备，重点复习 Java、Spring Boot、MySQL、Redis。
+- 进入 `interview1`：准备项目讲解和基础问题。
+- 进入 `interview2`：准备项目深挖、实习稳定性、团队协作、到岗时间。
+
+---
+
+## 更新状态规则
+
+如果用户要求更新状态：
+
+1. 先确认要更新的公司/岗位。
+2. 使用 `templates/states.yml` 中的状态。
+3. 优先通过现有 CLI 或既有 tracker 流程更新。
+4. 不要把日期写进 Status 字段；日期写进 Date 或 Notes。
+5. 不要虚构联系人、沟通时间或面试结果。
+
+---
+
+## 输出风格
+
+- 使用中文。
+- 简洁、可执行。
+- 重点提醒“下一步动作”。
+- 对长期无回复岗位给出节奏建议，不制造焦虑。

@@ -20,10 +20,14 @@ import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { LEGACY_COLMAP, detectColumns, resolveScoreStatus, normalizeVia } from './tracker-parse.mjs';
-import { resolveTrackerPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
+import { LEGACY_COLMAP, HEADER_ALIASES, detectColumns, resolveScoreStatus, normalizeVia } from './tracker-parse.mjs';
+import {
+  resolveTrackerPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic,
+  loadCanonicalStates, resolveCanonicalState, normalizeCompany, cell,
+} from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER overrides the path (used by tests and
 // non-standard layouts). Resolution lives in tracker-utils.mjs so every tracker
@@ -97,8 +101,48 @@ try {
   process.exit(1);
 }
 
-// Canonical states and aliases
-const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'];
+// Canonical states and aliases. templates/states.yml is the single source of
+// truth; legacy English labels are only accepted as compatibility inputs.
+let CANONICAL_STATES;
+try {
+  CANONICAL_STATES = loadCanonicalStates(STATES_FILE);
+} catch (err) {
+  console.error(`鉂?Cannot load canonical states from ${STATES_FILE}: ${err.message}`);
+  process.exit(1);
+}
+
+const LEGACY_STATUS_ALIASES = {
+  evaluated: 'evaluating',
+  applied: 'applied',
+  responded: 'contacted',
+  interview: 'interview1',
+  offer: 'offer',
+  rejected: 'rejected',
+  discarded: 'withdrawn',
+  skip: 'withdrawn',
+  evaluada: 'evaluating',
+  condicional: 'evaluating',
+  hold: 'evaluating',
+  evaluar: 'evaluating',
+  verificar: 'evaluating',
+  aplicado: 'applied',
+  enviada: 'applied',
+  aplicada: 'applied',
+  sent: 'applied',
+  respondido: 'contacted',
+  entrevista: 'interview1',
+  oferta: 'offer',
+  rechazado: 'rejected',
+  rechazada: 'rejected',
+  descartado: 'withdrawn',
+  descartada: 'withdrawn',
+  cerrada: 'withdrawn',
+  cancelada: 'withdrawn',
+  'no aplicar': 'withdrawn',
+  no_aplicar: 'withdrawn',
+  monitor: 'withdrawn',
+  'geo blocker': 'withdrawn',
+};
 
 /**
  * Convert raw addition status text into one canonical tracker state.
@@ -115,31 +159,19 @@ function validateStatus(status) {
   const clean = status.replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
   const lower = clean.toLowerCase();
 
-  for (const valid of CANONICAL_STATES) {
-    if (valid.toLowerCase() === lower) return valid;
+  const canonical = resolveCanonicalState(clean, CANONICAL_STATES);
+  if (canonical) return canonical;
+
+  const legacy = LEGACY_STATUS_ALIASES[lower];
+  if (legacy) return resolveCanonicalState(legacy, CANONICAL_STATES) || legacy;
+
+  // DUPLICADO/Repost -> withdrawn
+  if (/^(duplicado|dup|repost)/i.test(lower)) {
+    return resolveCanonicalState('withdrawn', CANONICAL_STATES) || 'withdrawn';
   }
 
-  // Aliases
-  const aliases = {
-    // Spanish → English
-    'evaluada': 'Evaluated', 'condicional': 'Evaluated', 'hold': 'Evaluated', 'evaluar': 'Evaluated', 'verificar': 'Evaluated',
-    'aplicado': 'Applied', 'enviada': 'Applied', 'aplicada': 'Applied', 'applied': 'Applied', 'sent': 'Applied',
-    'respondido': 'Responded',
-    'entrevista': 'Interview',
-    'oferta': 'Offer',
-    'rechazado': 'Rejected', 'rechazada': 'Rejected',
-    'descartado': 'Discarded', 'descartada': 'Discarded', 'cerrada': 'Discarded', 'cancelada': 'Discarded',
-    'no aplicar': 'SKIP', 'no_aplicar': 'SKIP', 'skip': 'SKIP', 'monitor': 'SKIP',
-    'geo blocker': 'SKIP',
-  };
-
-  if (aliases[lower]) return aliases[lower];
-
-  // DUPLICADO/Repost → Discarded
-  if (/^(duplicado|dup|repost)/i.test(lower)) return 'Discarded';
-
-  console.warn(`⚠️  Non-canonical status "${status}" → defaulting to "Evaluated"`);
-  return 'Evaluated';
+  console.warn(`WARNING: Non-canonical status "${status}" -> preserving original value`);
+  return clean;
 }
 
 // normalizeVia (Unicode-aware Via/agency key, #1596/#1603) lives in
@@ -205,6 +237,12 @@ function parseScore(s) {
   return m ? parseFloat(m[1]) : 0;
 }
 
+function scoreForCompare(row) {
+  const score100 = String(row?.score100 || '').replace(/\*\*/g, '').trim();
+  if (/^(?:100|[1-9]?\d)$/.test(score100)) return parseInt(score100, 10) / 20;
+  return parseScore(String(row?.score || ''));
+}
+
 // Column layout for the applications.md table. The tracker may use the original
 // 9-column layout, or a customized one with an extra/reordered column (e.g. a
 // Location column after Role). We map columns by header NAME rather than fixed
@@ -216,12 +254,68 @@ function parseScore(s) {
 // lockstep (see imports above). COLMAP stays mutable here — it is reassigned to
 // the detected layout once the table is read (below).
 let COLMAP = LEGACY_COLMAP;
+let HEADER_FIELDS = [];
+
+const LEGACY_HEADER_FIELDS = [
+  ['num', '#'],
+  ['date', 'Date'],
+  ['company', 'Company'],
+  ['role', 'Role'],
+  ['score', 'Score'],
+  ['status', 'Status'],
+  ['pdf', 'PDF'],
+  ['report', 'Report'],
+  ['notes', 'Notes'],
+];
+
+function detectHeaderFields(lines) {
+  for (const line of lines) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').map(s => s.trim());
+    const lower = cells.map(s => s.toLowerCase());
+    if (!lower.includes('company') || !lower.includes('role')) continue;
+    return cells
+      .map((header, index) => ({ header, index, field: HEADER_ALIASES[header.toLowerCase()] || null }))
+      .filter(col => col.header !== '');
+  }
+  return LEGACY_HEADER_FIELDS.map(([field, header], index) => ({ field, header, index: index + 1 }));
+}
+
+function valueForField(o, field, index) {
+  const fallback = o.__cells?.[index] || '—';
+  switch (field) {
+    case 'num': return o.num;
+    case 'date': return o.date;
+    case 'company': return cell(o.company);
+    case 'via': return cell(o.via || fallback);
+    case 'role': return cell(o.role);
+    case 'city': return cell(o.city || o.location || fallback);
+    case 'location': return cell(o.location || o.city || fallback);
+    case 'platform': return cell(o.platform || fallback);
+    case 'url': return cell(o.url || fallback);
+    case 'score': return o.score || fallback;
+    case 'score100': return o.score100 || fallback;
+    case 'resumeversion': return cell(o.resumeversion || fallback);
+    case 'recommendation': return cell(o.recommendation || fallback);
+    case 'status': return o.status || fallback;
+    case 'contact': return cell(o.contact || fallback);
+    case 'nextaction': return cell(o.nextaction || fallback);
+    case 'pdf': return o.pdf || fallback;
+    case 'report': return o.report || fallback;
+    case 'notes': return cell(o.notes || fallback);
+    default: return cell(fallback);
+  }
+}
 
 // Build a tracker row string matching the detected layout (with or without the
 // optional Via and Location columns) so writes round-trip through the same
 // schema. Optional columns follow the documented positions: Via after Company
 // (#1596), Location after Role (#946).
 function buildRow(o) {
+  const columns = HEADER_FIELDS.length > 0
+    ? HEADER_FIELDS
+    : LEGACY_HEADER_FIELDS.map(([field, header], index) => ({ field, header, index: index + 1 }));
+  return `| ${columns.map(col => valueForField(o, col.field, col.index)).join(' | ')} |`;
   const cells = [o.num, o.date, cell(o.company)];
   if (COLMAP.via != null) cells.push(cell(o.via) || '—');
   cells.push(cell(o.role));
@@ -252,12 +346,21 @@ function parseAppLine(line) {
     company: parts[COLMAP.company],
     via: COLMAP.via != null ? parts[COLMAP.via] : '',
     role: parts[COLMAP.role],
+    city: COLMAP.city != null ? parts[COLMAP.city] : '',
     location: COLMAP.location != null ? parts[COLMAP.location] : '',
+    platform: COLMAP.platform != null ? parts[COLMAP.platform] : '',
+    url: COLMAP.url != null ? parts[COLMAP.url] : '',
     score: parts[COLMAP.score],
+    score100: COLMAP.score100 != null ? parts[COLMAP.score100] : '',
+    resumeversion: COLMAP.resumeversion != null ? parts[COLMAP.resumeversion] : '',
+    recommendation: COLMAP.recommendation != null ? parts[COLMAP.recommendation] : '',
     status: parts[COLMAP.status],
+    contact: COLMAP.contact != null ? parts[COLMAP.contact] : '',
+    nextaction: COLMAP.nextaction != null ? parts[COLMAP.nextaction] : '',
     pdf: parts[COLMAP.pdf],
     report: parts[COLMAP.report],
     notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
+    __cells: parts,
     raw: line,
   };
 }
@@ -303,6 +406,28 @@ function parseTsvExtras(parts, filename) {
   };
 }
 
+function parseV2Parts(parts) {
+  return {
+    num: parseInt(parts[0]),
+    date: parts[1],
+    company: parts[2],
+    role: parts[3],
+    city: parts[4],
+    platform: parts[5],
+    url: parts[6],
+    score: String(parts[7] || '').replace(/\*\*/g, '').trim(),
+    score100: String(parts[8] || parts[7] || '').replace(/\*\*/g, '').trim(),
+    resumeversion: parts[9],
+    recommendation: parts[10],
+    status: validateStatus(parts[11]),
+    contact: parts[12],
+    nextaction: parts[13],
+    report: parts[14],
+    pdf: '',
+    notes: '',
+  };
+}
+
 function parseTsvContent(content, filename) {
   content = content.trim();
   if (!content) return null;
@@ -313,6 +438,9 @@ function parseTsvContent(content, filename) {
   // Detect pipe-delimited (markdown table row)
   if (content.startsWith('|')) {
     parts = content.split('|').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 15) {
+      addition = parseV2Parts(parts);
+    } else {
     if (parts.length < 8) {
       console.warn(`⚠️  Skipping malformed pipe-delimited ${filename}: ${parts.length} fields`);
       return null;
@@ -341,9 +469,13 @@ function parseTsvContent(content, filename) {
     const extras = parseTsvExtras(parts, filename);
     if (!extras) return null;
     Object.assign(addition, extras);
+    }
   } else {
     // Tab-separated
     parts = content.split('\t');
+    if (parts.length >= 15) {
+      addition = parseV2Parts(parts);
+    } else {
     if (parts.length < 8) {
       console.warn(`⚠️  Skipping malformed TSV ${filename}: ${parts.length} fields`);
       return null;
@@ -375,6 +507,7 @@ function parseTsvContent(content, filename) {
     const extras = parseTsvExtras(parts, filename);
     if (!extras) return null;
     Object.assign(addition, extras);
+    }
   }
 
   if (isNaN(addition.num) || addition.num === 0) {
@@ -462,6 +595,7 @@ const appLines = appContent.split('\n');
 // both work whether the table uses the original 9-column layout or a customized
 // one (e.g. with a Location column after Role). Falls back to the legacy layout.
 COLMAP = detectColumns(appLines) || LEGACY_COLMAP;
+HEADER_FIELDS = detectHeaderFields(appLines);
 if (COLMAP.location != null) console.log('🧭 Detected Location column.');
 if (COLMAP.via != null) console.log('🧭 Detected Via column.');
 const existingApps = [];
@@ -587,14 +721,16 @@ for (const file of tsvFiles) {
   }
 
   if (duplicate) {
-    const newScore = parseScore(addition.score);
-    const oldScore = parseScore(duplicate.score);
+    const newScore = scoreForCompare(addition);
+    const oldScore = scoreForCompare(duplicate);
 
     if (newScore > oldScore) {
       console.log(`🔄 Update: #${duplicate.num} ${addition.company} — ${addition.role} (${oldScore}→${newScore})`);
       const lineIdx = appLines.indexOf(duplicate.raw);
       if (lineIdx >= 0) {
         const updatedLine = buildRow({
+          ...addition,
+          __cells: duplicate.__cells,
           num: duplicate.num, date: addition.date, company: addition.company, role: addition.role,
           via: addition.via || duplicate.via || '—',
           location: addition.location || duplicate.location || '—',
@@ -615,6 +751,7 @@ for (const file of tsvFiles) {
     if (addition.num > maxNum) maxNum = addition.num;
 
     const newLine = buildRow({
+      ...addition,
       num: entryNum, date: addition.date, company: addition.company, role: addition.role,
       via: addition.via || '—',
       location: addition.location || '—',

@@ -34,21 +34,35 @@ const appliedDaysOverride = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx
 
 // --- Cadence config ---
 export const DEFAULT_CADENCE = {
+  contacted_first: 3,
+  contacted_subsequent: 3,
+  contacted_max_followups: 2,
+  hr_viewed_first: 2,
+  hr_viewed_subsequent: 2,
+  hr_viewed_max_followups: 2,
   applied_first: 7,
   applied_subsequent: 7,
   applied_max_followups: 2,
-  responded_initial: 1,
-  responded_subsequent: 3,
-  interview_thankyou: 1,
+  screening_check: 7,
+  test_prep: 0,
+  interview_prep: 0,
+  offer_followup: 1,
 };
 
 const PROFILE_CADENCE_KEYS = {
+  contacted_first_days: 'contacted_first',
+  contacted_subsequent_days: 'contacted_subsequent',
+  contacted_max_followups: 'contacted_max_followups',
+  hr_viewed_first_days: 'hr_viewed_first',
+  hr_viewed_subsequent_days: 'hr_viewed_subsequent',
+  hr_viewed_max_followups: 'hr_viewed_max_followups',
   applied_first_days: 'applied_first',
   applied_subsequent_days: 'applied_subsequent',
   applied_max_followups: 'applied_max_followups',
-  responded_initial_days: 'responded_initial',
-  responded_subsequent_days: 'responded_subsequent',
-  interview_thankyou_days: 'interview_thankyou',
+  screening_check_days: 'screening_check',
+  test_prep_days: 'test_prep',
+  interview_prep_days: 'interview_prep',
+  offer_followup_days: 'offer_followup',
 };
 
 function positiveInteger(value) {
@@ -86,18 +100,41 @@ const CADENCE = resolveCadenceConfig();
 const ALIASES = {
   'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated',
   'evaluar': 'evaluated', 'verificar': 'evaluated',
+  'evaluated': 'evaluating',
+  'recommended': 'recommended',
+  'contacted': 'contacted',
+  'hr viewed': 'hr_viewed',
+  'hr_viewed': 'hr_viewed',
+  'viewed': 'hr_viewed',
   'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
   'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
+  'respondido': 'contacted', 'responded': 'contacted',
+  'entrevista': 'interview1', 'interview': 'interview1',
+  'interview1': 'interview1', 'first interview': 'interview1',
+  'interview2': 'interview2', 'second interview': 'interview2',
+  'test': 'test', 'written test': 'test', 'coding test': 'test',
+  'screening': 'screening', 'resume screening': 'screening',
   'oferta': 'offer',
+  'offer': 'offer',
   'rechazado': 'rejected', 'rechazada': 'rejected',
+  'rejected': 'rejected',
   'descartado': 'discarded', 'descartada': 'discarded',
   'cerrada': 'discarded', 'cancelada': 'discarded',
+  'discarded': 'withdrawn',
+  'withdrawn': 'withdrawn',
   'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
 };
 
-const ACTIONABLE_STATUSES = ['applied', 'responded', 'interview'];
+const ACTIONABLE_STATUSES = [
+  'contacted',
+  'hr_viewed',
+  'applied',
+  'screening',
+  'test',
+  'interview1',
+  'interview2',
+  'offer',
+];
 
 export function normalizeStatus(raw) {
   const clean = raw.replace(/\*\*/g, '').trim().toLowerCase()
@@ -244,19 +281,36 @@ export function resolveReportPath(reportField, appsFile = APPS_FILE, repoRoot = 
 
 // --- Compute urgency ---
 export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount) {
+  if (status === 'contacted') {
+    if (followupCount >= CADENCE.contacted_max_followups) return 'cold';
+    if (followupCount === 0 && daysSinceApp >= CADENCE.contacted_first) return 'overdue';
+    if (followupCount > 0 && daysSinceLastFollowup !== null && daysSinceLastFollowup >= CADENCE.contacted_subsequent) return 'overdue';
+    return 'waiting';
+  }
+  if (status === 'hr_viewed') {
+    if (followupCount >= CADENCE.hr_viewed_max_followups) return 'cold';
+    if (followupCount === 0 && daysSinceApp >= CADENCE.hr_viewed_first) return 'overdue';
+    if (followupCount > 0 && daysSinceLastFollowup !== null && daysSinceLastFollowup >= CADENCE.hr_viewed_subsequent) return 'overdue';
+    return 'waiting';
+  }
   if (status === 'applied') {
     if (followupCount >= CADENCE.applied_max_followups) return 'cold';
     if (followupCount === 0 && daysSinceApp >= CADENCE.applied_first) return 'overdue';
     if (followupCount > 0 && daysSinceLastFollowup !== null && daysSinceLastFollowup >= CADENCE.applied_subsequent) return 'overdue';
     return 'waiting';
   }
-  if (status === 'responded') {
-    if (daysSinceApp < CADENCE.responded_initial) return 'urgent';
-    if (daysSinceApp >= CADENCE.responded_subsequent) return 'overdue';
+  if (status === 'screening') {
+    if (daysSinceApp >= CADENCE.screening_check) return 'overdue';
     return 'waiting';
   }
-  if (status === 'interview') {
-    if (daysSinceApp >= CADENCE.interview_thankyou) return 'overdue';
+  if (status === 'test') {
+    return daysSinceApp >= CADENCE.test_prep ? 'urgent' : 'waiting';
+  }
+  if (status === 'interview1' || status === 'interview2') {
+    return daysSinceApp >= CADENCE.interview_prep ? 'urgent' : 'waiting';
+  }
+  if (status === 'offer') {
+    if (daysSinceApp >= CADENCE.offer_followup) return 'urgent';
     return 'waiting';
   }
   return 'waiting';
@@ -264,18 +318,35 @@ export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, foll
 
 // --- Compute next follow-up date ---
 export function computeNextFollowupDate(status, appDate, lastFollowupDate, followupCount) {
+  if (status === 'contacted') {
+    if (followupCount >= CADENCE.contacted_max_followups) return null;
+    if (followupCount === 0) return addDays(parseDate(appDate), CADENCE.contacted_first);
+    if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.contacted_subsequent);
+    return addDays(parseDate(appDate), CADENCE.contacted_first);
+  }
+  if (status === 'hr_viewed') {
+    if (followupCount >= CADENCE.hr_viewed_max_followups) return null;
+    if (followupCount === 0) return addDays(parseDate(appDate), CADENCE.hr_viewed_first);
+    if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.hr_viewed_subsequent);
+    return addDays(parseDate(appDate), CADENCE.hr_viewed_first);
+  }
   if (status === 'applied') {
     if (followupCount >= CADENCE.applied_max_followups) return null; // cold
     if (followupCount === 0) return addDays(parseDate(appDate), CADENCE.applied_first);
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.applied_subsequent);
     return addDays(parseDate(appDate), CADENCE.applied_first);
   }
-  if (status === 'responded') {
-    if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.responded_subsequent);
-    return addDays(parseDate(appDate), CADENCE.responded_initial);
+  if (status === 'screening') {
+    return addDays(parseDate(appDate), CADENCE.screening_check);
   }
-  if (status === 'interview') {
-    return addDays(parseDate(appDate), CADENCE.interview_thankyou);
+  if (status === 'test') {
+    return addDays(parseDate(appDate), CADENCE.test_prep);
+  }
+  if (status === 'interview1' || status === 'interview2') {
+    return addDays(parseDate(appDate), CADENCE.interview_prep);
+  }
+  if (status === 'offer') {
+    return addDays(parseDate(appDate), CADENCE.offer_followup);
   }
   return null;
 }

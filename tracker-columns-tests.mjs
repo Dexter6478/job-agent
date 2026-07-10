@@ -33,7 +33,12 @@ const NODE = process.execPath;
 // real alias chain on fresh clones and CI, and skip cleanly on core-only
 // installs instead of crashing the whole suite with ERR_MODULE_NOT_FOUND.
 const HAS_WEB = existsSync(join(ROOT, 'web', 'src', 'lib', 'tracker-table.mjs'));
-function skipWeb(m) { console.log(`SKIP ${m} — web/ not present (core-only install; web/ is excluded from the auto-updater by design)`); }
+function skipWeb(m) { console.log(`SKIP ${m} - web/ not present (core-only install; web/ is excluded from the auto-updater by design)`); }
+const HAS_NODE_SQLITE = (() => {
+  const [major, minor] = process.versions.node.split('.').map(Number);
+  return major > 22 || (major === 22 && minor >= 5);
+})();
+function skipSqlite(m) { console.log(`SKIP ${m} - node:sqlite requires Node >= 22.5 (current ${process.version})`); }
 
 let passed = 0;
 let failed = 0;
@@ -94,19 +99,19 @@ const HEADER_10 = `# Applications Tracker
 
 | # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |
 |---|------|---------|------|----------|-------|--------|-----|--------|-------|
-| 1 | 2026-01-01 | Acme | Engineer | Remote | 4.0/5 | Applied | ✅ | — | seed row |
+| 1 | 2026-01-01 | Acme | Engineer | Remote | 4.0/5 | applied | ✅ | — | seed row |
 `;
 
 const HEADER_9 = `# Applications Tracker
 
 | # | Date | Company | Role | Score | Status | PDF | Report | Notes |
 |---|------|---------|------|-------|--------|-----|--------|-------|
-| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed row |
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | applied | ✅ | — | seed row |
 `;
 
 // TSV column order (status BEFORE score): num,date,company,role,status,score,pdf,report,notes[,location]
-const TSV_WITH_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\tnew row\tSingapore\n';
-const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\tnew row\n';
+const TSV_WITH_LOCATION = '2\t2026-02-02\tGlobex\tManager\tapplied\tN/A\t✅\t—\tnew row\tSingapore\n';
+const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tapplied\tN/A\t✅\t—\tnew row\n';
 
 // ── Test 1: 10-column tracker merges into the correct columns ──────────────
 {
@@ -123,7 +128,7 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
     else fail(`Location column populated — got "${cells[5]}" in row: ${row}`);
     if (cells[6] === 'N/A') pass('Score sits in the Score column');
     else fail(`Score in Score column — got "${cells[6]}" in row: ${row}`);
-    if (cells[7] === 'Applied') pass('Status sits in the Status column');
+    if (cells[7] === 'applied') pass('Status sits in the Status column');
     else fail(`Status in Status column — got "${cells[7]}" in row: ${row}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
@@ -149,7 +154,7 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
   const row = dataRows(sb.tracker).find(l => l.includes('Globex'));
   const cells = row ? row.split('|').map(s => s.trim()) : [];
   // cells: ['', num, date, company, role, score, status, pdf, report, notes, '']
-  if (merge.code === 0 && cells[5] === 'N/A' && cells[6] === 'Applied') {
+  if (merge.code === 0 && cells[5] === 'N/A' && cells[6] === 'applied') {
     pass('9-col tracker still merges into correct columns');
   } else {
     fail(`9-col tracker merge (code ${merge.code}) row: ${row}`);
@@ -167,18 +172,22 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
 // Score into Status and folded the real Notes cell away.
 {
   const sb = makeSandbox(HEADER_10);
-  const { sync, query, row } = syncAndQueryRow(sb, 'Acme');
-  if (sync.code === 0 && query.code === 0 && row) {
-    if (row.role === 'Engineer') pass('tracker.mjs: Role read from Role column on 10-col tracker');
-    else fail(`tracker.mjs: Role on 10-col tracker — got "${row.role}"`);
-    if (row.score === '4.0/5') pass('tracker.mjs: Score not shifted on 10-col tracker');
-    else fail(`tracker.mjs: Score on 10-col tracker — got "${row.score}"`);
-    if (row.status === 'Applied') pass('tracker.mjs: Status not shifted on 10-col tracker');
-    else fail(`tracker.mjs: Status on 10-col tracker — got "${row.status}"`);
-    if (row.notes === 'seed row') pass('tracker.mjs: Notes intact on 10-col tracker');
-    else fail(`tracker.mjs: Notes on 10-col tracker — got "${row.notes}"`);
+  if (!HAS_NODE_SQLITE) {
+    skipSqlite('tracker.mjs sync/query on 10-col tracker');
   } else {
-    fail(`tracker.mjs sync/query on 10-col tracker (sync ${sync.code}, query ${query.code})\n${sync.stdout}${query.stdout}`);
+    const { sync, query, row } = syncAndQueryRow(sb, 'Acme');
+    if (sync.code === 0 && query.code === 0 && row) {
+      if (row.role === 'Engineer') pass('tracker.mjs: Role read from Role column on 10-col tracker');
+      else fail(`tracker.mjs: Role on 10-col tracker - got "${row.role}"`);
+      if (row.score === '4.0/5') pass('tracker.mjs: Score not shifted on 10-col tracker');
+      else fail(`tracker.mjs: Score on 10-col tracker - got "${row.score}"`);
+      if (row.status === 'applied') pass('tracker.mjs: Status not shifted on 10-col tracker');
+      else fail(`tracker.mjs: Status on 10-col tracker - got "${row.status}"`);
+      if (row.notes === 'seed row') pass('tracker.mjs: Notes intact on 10-col tracker');
+      else fail(`tracker.mjs: Notes on 10-col tracker - got "${row.notes}"`);
+    } else {
+      fail(`tracker.mjs sync/query on 10-col tracker (sync ${sync.code}, query ${query.code})\n${sync.stdout}${query.stdout}`);
+    }
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }
@@ -223,7 +232,7 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
 
 | # | Date | Company | Priority | Role | Score | Status | PDF | Report | Notes |
 |---|------|---------|----------|------|-------|--------|-----|--------|-------|
-| 1 | 2026-01-01 | Acme | high | Engineer | 4.0/5 | Applied | ✅ | — | seed row |
+| 1 | 2026-01-01 | Acme | high | Engineer | 4.0/5 | applied | ✅ | — | seed row |
 `;
   const sb = makeSandbox(HEADER_UNKNOWN);
 
@@ -234,11 +243,15 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
     fail(`contract: verify-pipeline on unknown-column tracker (code ${verify.code})\n${verify.stdout}`);
   }
 
-  const { sync, row } = syncAndQueryRow(sb, 'Acme');
-  if (sync.code === 0 && row && row.role === 'Engineer' && row.score === '4.0/5' && row.status === 'Applied') {
-    pass('contract: tracker.mjs skips an unknown extra column');
+  if (!HAS_NODE_SQLITE) {
+    skipSqlite('contract: tracker.mjs skips an unknown extra column');
   } else {
-    fail(`contract: tracker.mjs on unknown-column tracker — got ${JSON.stringify(row)}`);
+    const { sync, row } = syncAndQueryRow(sb, 'Acme');
+    if (sync.code === 0 && row && row.role === 'Engineer' && row.score === '4.0/5' && row.status === 'applied') {
+      pass('contract: tracker.mjs skips an unknown extra column');
+    } else {
+      fail(`contract: tracker.mjs on unknown-column tracker - got ${JSON.stringify(row)}`);
+    }
   }
 
   const { loadSeenCompanyRoles } = await import('./scan.mjs');
@@ -267,7 +280,7 @@ if (!HAS_WEB) {
 
 | # | Date | Company | Role | Location | Score | Status | PDF | Report | Priority | Notes |
 |---|------|---------|------|----------|-------|--------|-----|--------|----------|-------|
-| 1 | 2026-01-01 | Acme | Engineer | Remote | 4.0/5 | Applied | ✅ | — | high | seed row |
+| 1 | 2026-01-01 | Acme | Engineer | Remote | 4.0/5 | applied | ✅ | — | high | seed row |
 `;
   const rows = parseApplications(WEB_10COL, ROOT);
   const r = rows[0];
@@ -276,7 +289,7 @@ if (!HAS_WEB) {
   } else {
     fail(`web reader: Company/Role on 10-col tracker — got ${JSON.stringify(r)}`);
   }
-  if (r && r.score === '4.0/5' && r.status === 'Applied') {
+  if (r && r.score === '4.0/5' && r.status === 'applied') {
     pass('web reader: Score/Status not shifted by Location column');
   } else {
     fail(`web reader: Score/Status on 10-col tracker — got ${JSON.stringify(r)}`);
@@ -301,8 +314,8 @@ const HEADER_VIA = `# Applications Tracker
 
 | # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
 |---|------|---------|-----|------|-------|--------|-----|--------|-------|
-| 1 | 2026-01-01 | Acme | — | Engineer | 4.0/5 | Applied | ✅ | — | direct seed row |
-| 2 | 2026-01-05 | ? | Hays | Data Engineer | 4.2/5 | Applied | ✅ | — | fintech, Leeds |
+| 1 | 2026-01-01 | Acme | — | Engineer | 4.0/5 | applied | ✅ | — | direct seed row |
+| 2 | 2026-01-05 | ? | Hays | Data Engineer | 4.2/5 | applied | ✅ | — | fintech, Leeds |
 `;
 
 // ── Test 9: parseTrackerRow surfaces the Via column ─────────────────────────
@@ -318,7 +331,7 @@ const HEADER_VIA = `# Applications Tracker
   } else {
     fail(`parseTrackerRow: Via layout — got ${JSON.stringify(direct)}`);
   }
-  if (blind && blind.company === '?' && blind.via === 'Hays' && blind.status === 'Applied') {
+  if (blind && blind.company === '?' && blind.via === 'Hays' && blind.status === 'applied') {
     pass('parseTrackerRow: unknown-employer (?) row carries via');
   } else {
     fail(`parseTrackerRow: ? row — got ${JSON.stringify(blind)}`);
@@ -330,13 +343,13 @@ const HEADER_VIA = `# Applications Tracker
 // field (`via=Hays`) instead of another positional slot, so a stale writer
 // omitting the empty-location pad can't silently shift columns.
 {
-  const TSV_VIA = '3\t2026-02-02\t?\tPlatform Engineer\tApplied\t4.1/5\t✅\t—\tblind agency listing\tvia=Hays\n';
+  const TSV_VIA = '3\t2026-02-02\t?\tPlatform Engineer\tapplied\t4.1/5\t✅\t—\tblind agency listing\tvia=Hays\n';
   const sb = makeSandbox(HEADER_VIA, { '3-blind.tsv': TSV_VIA });
   const res = runScript('merge-tracker.mjs', [], sb);
   const row = dataRows(sb.tracker).find(l => l.includes('Platform Engineer'));
   const cells = row ? row.split('|').map(s => s.trim()) : [];
   // cells: ['', num, date, company, via, role, score, status, pdf, report, notes, '']
-  if (res.code === 0 && cells[3] === '?' && cells[4] === 'Hays' && cells[6] === '4.1/5' && cells[7] === 'Applied') {
+  if (res.code === 0 && cells[3] === '?' && cells[4] === 'Hays' && cells[6] === '4.1/5' && cells[7] === 'applied') {
     pass('merge: via= tag lands in the Via column, ? company preserved');
   } else {
     fail(`merge: via= tag (code ${res.code}) row: ${row}\n${res.stdout}`);
@@ -346,8 +359,8 @@ const HEADER_VIA = `# Applications Tracker
 
 // ── Test 11: ambiguous TSV extras are rejected loudly, never merged ─────────
 {
-  const TWO_UNTAGGED = '4\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\tnote\tSingapore\tHays\n';
-  const TWO_TAGS = '5\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\tnote\tvia=Hays\tvia=Randstad\n';
+  const TWO_UNTAGGED = '4\t2026-02-02\tGlobex\tManager\tapplied\tN/A\t✅\t—\tnote\tSingapore\tHays\n';
+  const TWO_TAGS = '5\t2026-02-02\tGlobex\tManager\tapplied\tN/A\t✅\t—\tnote\tvia=Hays\tvia=Randstad\n';
   const sb = makeSandbox(HEADER_VIA, { '4-a.tsv': TWO_UNTAGGED, '5-b.tsv': TWO_TAGS });
   const res = runScript('merge-tracker.mjs', [], sb);
   const rows = dataRows(sb.tracker);
@@ -367,8 +380,8 @@ const HEADER_VIA = `# Applications Tracker
 // hazard the Via column exists to surface. Same agency + same role IS the
 // re-blast duplicate and must still merge/update.
 {
-  const OTHER_AGENCY = '6\t2026-02-02\t?\tData Engineer\tApplied\t4.5/5\t✅\t—\tsame role, other agency\tvia=Randstad\n';
-  const SAME_AGENCY = '7\t2026-02-03\t?\tData Engineer\tApplied\t4.6/5\t✅\t—\tre-blast, higher score\tvia=Hays\n';
+  const OTHER_AGENCY = '6\t2026-02-02\t?\tData Engineer\tapplied\t4.5/5\t✅\t—\tsame role, other agency\tvia=Randstad\n';
+  const SAME_AGENCY = '7\t2026-02-03\t?\tData Engineer\tapplied\t4.6/5\t✅\t—\tre-blast, higher score\tvia=Hays\n';
   const sb = makeSandbox(HEADER_VIA, { '6-other.tsv': OTHER_AGENCY });
   const res1 = runScript('merge-tracker.mjs', [], sb);
   const rowsAfter1 = dataRows(sb.tracker).filter(l => l.includes('Data Engineer'));
@@ -394,8 +407,8 @@ const HEADER_VIA = `# Applications Tracker
 // cross-channel guard would see 'Hays' ≠ '' and add a second ? row instead of
 // updating the same-agency re-blast.
 {
-  const FIRST = '2\t2026-02-02\t?\tData Engineer\tApplied\t4.1/5\t✅\t—\tblind listing\tvia=Hays\n';
-  const REBLAST = '3\t2026-02-10\t?\tData Engineer\tApplied\t4.3/5\t✅\t—\tre-blast, higher score\tvia=Hays\n';
+  const FIRST = '2\t2026-02-02\t?\tData Engineer\tapplied\t4.1/5\t✅\t—\tblind listing\tvia=Hays\n';
+  const REBLAST = '3\t2026-02-10\t?\tData Engineer\tapplied\t4.3/5\t✅\t—\tre-blast, higher score\tvia=Hays\n';
   const sb = makeSandbox(HEADER_9, { '2-first.tsv': FIRST });
   const res1 = runScript('merge-tracker.mjs', [], sb);
   writeFileSync(join(sb.additions, '3-reblast.tsv'), REBLAST);
@@ -438,11 +451,11 @@ const HEADER_VIA = `# Applications Tracker
 
 | # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
 |---|------|---------|-----|------|-------|--------|-----|--------|-------|
-| 1 | 2026-01-05 | ? | Hays | Data Engineer | 4.2/5 | Evaluated | ✅ | — | fintech, Leeds |
-| 2 | 2026-01-20 | ? | Hays | Data Engineer | 4.3/5 | Evaluated | ✅ | — | re-blast of same listing |
-| 3 | 2026-01-06 | ? | Randstad | Data Engineer | 4.0/5 | Evaluated | ✅ | — | different channel |
-| 4 | 2026-01-10 | ? | Hays | Platform Engineer | 3.9/5 | Evaluated | ✅ | — | old listing |
-| 5 | 2026-06-01 | ? | Hays | Platform Engineer | 4.4/5 | Evaluated | ✅ | — | far outside window |
+| 1 | 2026-01-05 | ? | Hays | Data Engineer | 4.2/5 | evaluating | ✅ | — | fintech, Leeds |
+| 2 | 2026-01-20 | ? | Hays | Data Engineer | 4.3/5 | evaluating | ✅ | — | re-blast of same listing |
+| 3 | 2026-01-06 | ? | Randstad | Data Engineer | 4.0/5 | evaluating | ✅ | — | different channel |
+| 4 | 2026-01-10 | ? | Hays | Platform Engineer | 3.9/5 | evaluating | ✅ | — | old listing |
+| 5 | 2026-06-01 | ? | Hays | Platform Engineer | 4.4/5 | evaluating | ✅ | — | far outside window |
 `;
   const sb = makeSandbox(BLIND_TRACKER);
   const res = runScript('dedup-tracker.mjs', [], sb);
@@ -468,10 +481,10 @@ const HEADER_VIA = `# Applications Tracker
 
 | # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
 |---|------|---------|-----|------|-------|--------|-----|--------|-------|
-| 1 | 2026-01-05 | ? | — | Data Engineer | 4.2/5 | Evaluated | ✅ | — | blind row, no agency |
-| 2 | 2026-01-06 | Confidential | Hays | ML Engineer | 4.0/5 | Evaluated | ✅ | — | word placeholder |
-| 3 | 2026-01-07 | Acme | Hays | Backend Engineer | 4.1/5 | Applied | ✅ | — | via agency |
-| 4 | 2026-01-08 | Acme | — | Backend Engineer | 4.1/5 | Applied | ✅ | — | direct too |
+| 1 | 2026-01-05 | ? | — | Data Engineer | 4.2/5 | evaluating | ✅ | — | blind row, no agency |
+| 2 | 2026-01-06 | Confidential | Hays | ML Engineer | 4.0/5 | evaluating | ✅ | — | word placeholder |
+| 3 | 2026-01-07 | Acme | Hays | Backend Engineer | 4.1/5 | applied | ✅ | — | via agency |
+| 4 | 2026-01-08 | Acme | — | Backend Engineer | 4.1/5 | applied | ✅ | — | direct too |
 `;
   const sb = makeSandbox(VIA_ISSUES);
   const res = runScript('verify-pipeline.mjs', [], sb);
@@ -544,6 +557,85 @@ if (!HAS_WEB) {
   }
 
   rmSync(dir, { recursive: true, force: true });
+}
+
+// -- V2 Phase 1: China tracker schema -------------------------------------------------
+{
+  const HEADER_V2 = `# Applications Tracker
+
+| # | Date | Company | Role | City | Platform | URL | Score | Score100 | ResumeVersion | Recommendation | Status | Contact | NextAction | Report |
+|---|------|---------|------|------|----------|-----|-------|----------|---------------|----------------|--------|---------|------------|--------|
+| 1 | 2026-07-01 | SeedCo | Java Intern | Shanghai | BOSS | https://example.com/seed | 82 | 82 | JavaBackend | recommended | recommended | hello | follow up | [001](../reports/001-seed.md) |
+`;
+  const { resolveColumns, parseTrackerRow } = await import('./tracker-parse.mjs');
+  const lines = HEADER_V2.split('\n');
+  const colmap = resolveColumns(lines);
+  const row = lines.map(l => parseTrackerRow(l, colmap)).filter(Boolean)[0];
+  if (colmap.city != null && colmap.platform != null && colmap.url != null && colmap.score100 != null) {
+    pass('V2 header: China fields are detected by header aliases');
+  } else {
+    fail(`V2 header: missing mapped fields ${JSON.stringify(colmap)}`);
+  }
+  if (row && row.city === 'Shanghai' && row.platform === 'BOSS' && row.score100 === '82' && row.resumeversion === 'JavaBackend') {
+    pass('V2 parser: row exposes City, Platform, Score100, ResumeVersion');
+  } else {
+    fail(`V2 parser: row fields ${JSON.stringify(row)}`);
+  }
+}
+
+{
+  const HEADER_V2 = `# Applications Tracker
+
+| # | Date | Company | Role | City | Platform | URL | Score | Score100 | ResumeVersion | Recommendation | Status | Contact | NextAction | Report |
+|---|------|---------|------|------|----------|-----|-------|----------|---------------|----------------|--------|---------|------------|--------|
+| 1 | 2026-07-01 | SeedCo | Java Intern | Shanghai | BOSS | https://example.com/seed | 82 | 82 | JavaBackend | recommended | recommended | hello | follow up | [001](../reports/001-seed.md) |
+`;
+  const TSV_V2 = '2\t2026-07-10\tTestTech\tJava Backend Intern\tShanghai\tBOSS\thttps://example.com/job\t88\t88\tJavaBackend\trecommended\trecommended\tcontact message\tsend boss message\t[002](reports/002-test.md)\n';
+  const sb = makeSandbox(HEADER_V2, { '2-v2.tsv': TSV_V2 });
+  const res = runScript('merge-tracker.mjs', [], sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('TestTech'));
+  const cells = row ? row.split('|').map(s => s.trim()) : [];
+  if (res.code === 0 && cells[5] === 'Shanghai' && cells[6] === 'BOSS' && cells[7] === 'https://example.com/job') {
+    pass('V2 merge: City, Platform and URL written to formal columns');
+  } else {
+    fail(`V2 merge: basic fields (code ${res.code}) row: ${row}\n${res.stdout}`);
+  }
+  if (cells[8] === '88' && cells[9] === '88') {
+    pass('V2 merge: Score and Score100 support 100-point values');
+  } else {
+    fail(`V2 merge: score fields got Score="${cells[8]}" Score100="${cells[9]}" row: ${row}`);
+  }
+  if (cells[10] === 'JavaBackend' && cells[11] === 'recommended') {
+    pass('V2 merge: ResumeVersion and Recommendation written');
+  } else {
+    fail(`V2 merge: resume/recommendation fields row: ${row}`);
+  }
+  if (cells[12] === 'recommended' && cells[13] === 'contact message' && cells[14] === 'send boss message') {
+    pass('V2 merge: Status, Contact and NextAction written');
+  } else {
+    fail(`V2 merge: status/contact/nextAction row: ${row}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+{
+  const HEADER_V2_UNKNOWN = `# Applications Tracker
+
+| # | Date | Company | Role | Priority | City | Platform | URL | Score | Score100 | ResumeVersion | Recommendation | Status | Contact | NextAction | Report |
+|---|------|---------|------|----------|------|----------|-----|-------|----------|---------------|----------------|--------|---------|------------|--------|
+| 1 | 2026-07-01 | SeedCo | Java Intern | high | Shanghai | BOSS | https://example.com/seed | 82 | 82 | JavaBackend | recommended | recommended | hello | follow up | [001](../reports/001-seed.md) |
+`;
+  const TSV_V2 = '2\t2026-07-10\tTestTech\tJava Backend Intern\tShanghai\tBOSS\thttps://example.com/job\t88\t88\tJavaBackend\trecommended\trecommended\tcontact message\tsend boss message\t[002](reports/002-test.md)\n';
+  const sb = makeSandbox(HEADER_V2_UNKNOWN, { '2-v2.tsv': TSV_V2 });
+  const res = runScript('merge-tracker.mjs', [], sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('TestTech'));
+  const cells = row ? row.split('|').map(s => s.trim()) : [];
+  if (res.code === 0 && cells[5] === '—' && cells[6] === 'Shanghai' && cells[9] === '88' && cells[15] === 'send boss message') {
+    pass('V2 merge: unknown columns are padded safely without shifting known fields');
+  } else {
+    fail(`V2 merge: unknown-column safety row: ${row}\n${res.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
